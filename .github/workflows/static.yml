@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>SISTEMA JAZMIN - ROSA Y VERDE</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        #menu-btn { position: absolute; top: 20px; left: 20px; z-index: 200; background: #ffcc00; border: none; width: 45px; height: 45px; border-radius: 10px; cursor: pointer; font-size: 24px; box-shadow: 0 0 15px rgba(255, 204, 0, 0.4); }
+        #ui { position: absolute; top: 80px; left: 20px; color: white; z-index: 100; background: rgba(0,0,0,0.85); padding: 20px; border-radius: 10px; border-left: 5px solid #ffcc00; width: 230px; transition: 0.3s; transform: translateX(-150%); }
+        #ui.show { transform: translateX(0); }
+        
+        /* BOTÓN DE IMAGEN EN VERDE PASTEL */
+        .custom-file-upload { 
+            border: 1px solid #98FB98; /* Borde verde pastel */
+            display: inline-block; padding: 10px; cursor: pointer; 
+            background-color: #3CB371; /* Fondo verde pastel más oscuro */
+            border-radius: 5px; margin-top: 10px; font-weight: bold; 
+            color: white; /* Texto blanco para contraste */
+            width: 100%; text-align: center; box-sizing: border-box;
+            transition: 0.2s;
+        }
+        .custom-file-upload:hover { background-color: #66CDAA; } /* Verde más claro al pasar el mouse */
+
+        #status-message { margin-top: 10px; color: #00ff00; font-size: 12px; text-align: center; }
+        #webcam { position: absolute; bottom: 10px; right: 10px; width: 140px; border: 1px solid #333; border-radius: 5px; transform: scaleX(-1); opacity: 0.4; }
+    </style>
+</head>
+<body>
+    <button id="menu-btn">☰</button>
+    <div id="ui">
+        <h2 style="font-size: 16px; margin: 0 0 10px 0; color: #ffcc00;">MODO INTERACTIVO</h2>
+        <p style="font-size: 12px;"><span style="color:#ffcc00">J</span>: Jazmín (Rosa Pastel)</p>
+        <p style="font-size: 12px;"><span style="color:#ffcc00">G</span>: Girasol</p>
+        <p style="font-size: 12px;"><span style="color:#ffcc00">X</span>: Poema para Jazmín</p>
+        <hr style="border: 0.5px solid #444;">
+        <label for="imageUpload" class="custom-file-upload">Seleccionar Imagen</label>
+        <input type="file" id="imageUpload" accept="image/png, image/jpeg" style="display:none;">
+        <div id="status-message">Esperando imagen...</div>
+    </div>
+    <video id="webcam" autoplay playsinline></video>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+    <script type="module">
+        import * as THREE from 'https://unpkg.com/three@0.150.0/build/three.module.js';
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+        camera.position.z = 100;
+
+        let points = null; 
+        let targetX = 0, targetY = 0;
+
+        const material = new THREE.ShaderMaterial({
+            uniforms: { uTime: { value: 0 }, uScale: { value: 1.0 } },
+            vertexShader: `
+                attribute vec3 customColor;
+                varying vec3 vColor;
+                uniform float uScale;
+                void main() {
+                    vColor = customColor;
+                    vec4 mvp = modelViewMatrix * vec4(position * uScale, 1.0);
+                    gl_PointSize = (170.0 / -mvp.z);
+                    gl_Position = projectionMatrix * mvp;
+                }
+            `,
+            fragmentShader: `
+                varying vec3 vColor;
+                void main() {
+                    if(length(gl_PointCoord - 0.5) > 0.5) discard;
+                    gl_FragColor = vec4(vColor, 0.9);
+                }
+            `,
+            transparent: true, blending: THREE.AdditiveBlending
+        });
+
+        // INTERACCIÓN CON MANOS
+        const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5 });
+        hands.onResults((res) => {
+            if (res.multiHandLandmarks && res.multiHandLandmarks[0]) {
+                const l = res.multiHandLandmarks[0][9];
+                targetX = (l.x - 0.5) * -120;
+                targetY = (l.y - 0.5) * -100;
+                const d = Math.hypot(res.multiHandLandmarks[0][4].x - res.multiHandLandmarks[0][8].x, res.multiHandLandmarks[0][4].y - res.multiHandLandmarks[0][8].y);
+                material.uniforms.uScale.value = THREE.MathUtils.lerp(material.uniforms.uScale.value, d * 25, 0.1);
+            }
+        });
+        new Camera(document.getElementById('webcam'), { onFrame: async () => await hands.send({image: document.getElementById('webcam')}) }).start();
+
+        function createPoints(pos, col) {
+            if (points) { scene.remove(points); points.geometry.dispose(); }
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            geo.setAttribute('customColor', new THREE.Float32BufferAttribute(col, 3));
+            points = new THREE.Points(geo, material);
+            scene.add(points);
+        }
+
+        // --- JAZMIN EN ROSA PASTEL ---
+        function generateJazmin() {
+            const pos = [], col = [];
+            const cvs = document.createElement('canvas'); const cx = cvs.getContext('2d');
+            cvs.width = 600; cvs.height = 150;
+            cx.fillStyle = 'white'; cx.font = 'bold 90px sans-serif'; cx.textAlign = 'center'; cx.textBaseline = 'middle';
+            cx.fillText('JAZMIN', 300, 75);
+            const data = cx.getImageData(0,0,600,150).data;
+            for(let i=0; i<data.length; i+=4) if(data[i]>128) {
+                pos.push(((i/4)%600 - 300)*0.4, (Math.floor((i/4)/600) - 75)*-0.4, (Math.random()-0.5)*2);
+                // Color Rosa Pastel (R: 0.95, G: 0.7, B: 0.8)
+                col.push(0.95, 0.7, 0.8);
+            }
+            createPoints(pos, col);
+        }
+
+        function generateSunflower() {
+            const pos = [], col = [];
+            const numSeeds = 8000;
+            for(let i = 0; i < numSeeds; i++) {
+                const angle = i * 137.508 * (Math.PI / 180);
+                const r = 0.18 * Math.sqrt(i);
+                pos.push(r * Math.cos(angle), r * Math.sin(angle), (Math.random()-0.5)*1);
+                const c = 0.15 + (Math.random() * 0.1);
+                col.push(c * 1.2, c * 0.7, 0.05);
+            }
+            const numPetals = 32; const ptsPerPetal = 600;
+            for(let p = 0; p < numPetals; p++) {
+                const petalAngle = (p / numPetals) * Math.PI * 2;
+                for(let i = 0; i < ptsPerPetal; i++) {
+                    const t = i / ptsPerPetal; const s = Math.sin(t * Math.PI);
+                    const length = 16 + (t * 22); const width = s * 4;
+                    const px = length * Math.cos(petalAngle) + (Math.random()-0.5)*width * Math.sin(petalAngle);
+                    const py = length * Math.sin(petalAngle) + (Math.random()-0.5)*width * Math.cos(petalAngle);
+                    pos.push(px, py, t * 4);
+                    col.push(1.0, 0.8 + (t * 0.2), 0.0);
+                }
+            }
+            createPoints(pos, col);
+        }
+
+        // --- TU LÓGICA DE IMAGEN (INTACTA) ---
+        function loadImageAsParticles(image) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const maxDimension = 150; 
+            let w = image.width, h = image.height;
+            if (w > h) { if (w > maxDimension) { h *= maxDimension / w; w = maxDimension; } }
+            else { if (h > maxDimension) { w *= maxDimension / h; h = maxDimension; } }
+            canvas.width = w; canvas.height = h;
+            ctx.drawImage(image, 0, 0, w, h);
+            const data = ctx.getImageData(0, 0, w, h).data;
+            const pos = [], col = [];
+            for (let i = 0; i < data.length; i += 4) {
+                if (data[i + 3] > 50) {
+                    pos.push(((i/4)%w - w/2) * 0.5, (Math.floor((i/4)/w) - h/2) * -0.5, (Math.random()-0.5)*5);
+                    col.push(data[i]/255, data[i+1]/255, data[i+2]/255);
+                }
+            }
+            createPoints(pos, col);
+        }
+
+        document.getElementById('imageUpload').onchange = (e) => {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                const img = new Image();
+                img.onload = () => loadImageAsParticles(img);
+                img.src = ev.target.result;
+            };
+            reader.readAsDataURL(e.target.files[0]);
+        };
+
+        window.onkeydown = (e) => {
+            const k = e.key.toLowerCase();
+            if(k === 'j') generateJazmin();
+            if(k === 'g') generateSunflower();
+            if(k === 'x') {
+                const poema = `Oh, Jazmín de mi vida, entre mil luces,
+tu nombre en partículas el aire seduce.
+Un rosa suave, un suspiro en el viento,
+eres la melodía de mi pensamiento.
+
+Cada pixel, un latido, un fragmento de ti,
+bailando en el espacio, cerca de mí.
+Jazmín, mi dulce flor, mi amor sin igual,
+en este universo digital, mi estrella fugaz.
+jajaja te amo mucho mi jaz`;
+                alert(poema);
+            }
+        };
+
+        document.getElementById('menu-btn').onclick = () => document.getElementById('ui').classList.toggle('show');
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (points) {
+                points.position.x = THREE.MathUtils.lerp(points.position.x, targetX, 0.1);
+                points.position.y = THREE.MathUtils.lerp(points.position.y, targetY, 0.1);
+                points.rotation.y += 0.005; 
+            }
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
